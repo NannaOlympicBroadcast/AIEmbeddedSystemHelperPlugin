@@ -7,7 +7,8 @@ import { sendChat, streamChat, isStreamingEnabled, getBackendUrl } from "./agent
 type WebviewMessage =
   | { type: "userMessage"; text: string }
   | { type: "clearHistory" }
-  | { type: "reloadAgent" };
+  | { type: "reloadAgent" }
+  | { type: "stopStream" };
 
 type PanelMessage =
   | { type: "assistantChunk"; text: string }
@@ -24,6 +25,8 @@ export class ChatPanel {
   private readonly _extensionUri: vscode.Uri;
   private _sessionId: string | undefined;
   private _disposables: vscode.Disposable[] = [];
+  private _currentAbort?: () => void;
+  private _streamGeneration = 0;
 
   private constructor(panel: vscode.WebviewPanel, context: vscode.ExtensionContext) {
     this._panel = panel;
@@ -41,6 +44,37 @@ export class ChatPanel {
         }
         if (msg.type === "reloadAgent") {
           await this._reloadAgent();
+          return;
+        }
+        if (msg.type === "stopStream") {
+          this._currentAbort?.();
+          const sidToSeal = this._sessionId;
+          if (sidToSeal) {
+            const sealUrl = new URL(`/session/${sidToSeal}/seal`, getBackendUrl());
+            const mod = sealUrl.protocol === "https:" ? https : http;
+            await new Promise<void>((resolve) => {
+              const req = mod.request(sealUrl, { method: "POST" }, (res) => {
+                let body = "";
+                res.on("data", (chunk: Buffer) => (body += chunk.toString()));
+                res.on("end", () => {
+                  try {
+                    const data = JSON.parse(body);
+                    this._panel.webview.postMessage({ type: "streamStopped", preserved: data.preserved ?? true });
+                  } catch {
+                    this._panel.webview.postMessage({ type: "streamStopped", preserved: true });
+                  }
+                  resolve();
+                });
+              });
+              req.on("error", () => {
+                this._panel.webview.postMessage({ type: "streamStopped", preserved: true });
+                resolve();
+              });
+              req.end();
+            });
+          } else {
+            this._panel.webview.postMessage({ type: "streamStopped", preserved: true });
+          }
           return;
         }
         if (msg.type === "userMessage") {
@@ -96,8 +130,9 @@ export class ChatPanel {
       this._panel.webview.postMessage(msg);
 
     if (isStreamingEnabled()) {
+      const gen = ++this._streamGeneration;
       try {
-        const { promise } = streamChat(
+        const { promise, abort } = streamChat(
           text,
           this._sessionId,
           (chunk) => {
@@ -119,15 +154,25 @@ export class ChatPanel {
                 result: toolEvent.result ?? "",
               });
             }
-          }
+          },
+          // Capture session ID from response header immediately
+          (sid) => { this._sessionId = sid; }
         );
+        this._currentAbort = abort;
+        post({ type: "streamStarted" } as any);
         const sid = await promise;
+        if (gen !== this._streamGeneration) { return; }
         if (sid) {
           this._sessionId = sid;
         }
         post({ type: "assistantDone" });
       } catch (err) {
+        if (gen !== this._streamGeneration) { return; }
         post({ type: "error", text: String(err) });
+      } finally {
+        if (gen === this._streamGeneration) {
+          this._currentAbort = undefined;
+        }
       }
     } else {
       try {
@@ -165,6 +210,7 @@ export class ChatPanel {
   <div id="chat-container">
     <div id="toolbar">
       <button id="clear-btn">🗑 Clear</button>
+      <button id="stop-btn" disabled>⏹ Stop</button>
       <button id="reload-btn">🔄 Reload Agent</button>
     </div>
     <div id="messages"></div>

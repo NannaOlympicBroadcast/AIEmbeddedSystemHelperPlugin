@@ -83,12 +83,15 @@ export type AgentEvent = ToolEvent | FormEvent;
 
 /** GET /chat/stream – calls onChunk for text, onTool for tool/form events.
  *  Returns both the promise and an abort() function that terminates the stream
- *  immediately without triggering an error in the UI. */
+ *  immediately without triggering an error in the UI.
+ *  onSessionId is called as soon as the response header arrives — use it to
+ *  capture the session ID BEFORE the stream finishes (critical for Stop). */
 export function streamChat(
   message: string,
   sessionId: string | undefined,
   onChunk: (chunk: string) => void,
-  onTool?: (event: AgentEvent) => void
+  onTool?: (event: AgentEvent) => void,
+  onSessionId?: (sid: string) => void
 ): { promise: Promise<string | undefined>; abort: () => void } {
   const url = new URL("/chat/stream", getBackendUrl());
   url.searchParams.set("message", message);
@@ -104,6 +107,10 @@ export function streamChat(
     req = mod.request(url, { method: "GET" }, (res) => {
       const returnedSessionId =
         (res.headers["x-session-id"] as string | undefined) ?? sessionId;
+      // Notify caller of session ID immediately — don't wait for stream end
+      if (returnedSessionId && onSessionId) {
+        onSessionId(returnedSessionId);
+      }
       let buffer = "";
       res.on("data", (chunk: Buffer) => {
         buffer += chunk.toString();

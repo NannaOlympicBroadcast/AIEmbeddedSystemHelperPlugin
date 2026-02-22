@@ -35,6 +35,10 @@ _LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 _logger = logging.getLogger("conversation")
 _logger.setLevel(logging.DEBUG)
+_log_handler = logging.StreamHandler()
+_log_handler.setLevel(logging.DEBUG)
+_log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"))
+_logger.addHandler(_log_handler)
 
 
 def _log_entry(session_id: str, role: str, content: str) -> None:
@@ -70,9 +74,12 @@ _electerm_was_reachable: bool = False
 # _runner for the same session (which would deadlock or corrupt state).
 _active_stream_tasks: dict[str, asyncio.Task] = {}
 
-# Cooperative stop signals — set the event to ask a running stream to stop
-# gracefully WITHOUT throwing CancelledError (which corrupts ADK session state).
+# Cooperative stop signals — set the event to ask a running stream to stop.
 _stop_events: dict[str, asyncio.Event] = {}
+
+# Partial assistant text accumulated before a stop, keyed by session id.
+# Written by _stream_agent(), consumed (popped) by /seal.
+_partial_texts: dict[str, str] = {}
 
 
 def _check_electerm_reachable() -> bool:
@@ -214,23 +221,21 @@ async def _stream_agent(
     _t0 = _time.monotonic()
     _event_count = 0
 
-    async for event in _runner.run_async(
+    _logger.info("[DEBUG][stream] >>> START run_async for session=%s msg=%r", session_id, message[:80])
+    try:
+      async for event in _runner.run_async(
         user_id="vscode-user",
         session_id=session_id,
         new_message=user_content,
-    ):
+      ):
         _event_count += 1
         _elapsed = _time.monotonic() - _t0
         _author = getattr(event, "author", "") or ""
         _logger.info("  [stream] event #%d from '%s' at +%.1fs", _event_count, _author, _elapsed)
-        # ── cooperative stop: keep draining but don't yield SSE chunks ──
-        # IMPORTANT: we use `continue` instead of `break` because `break`
-        # calls aclose() on _runner.run_async(), which throws GeneratorExit
-        # into the ADK runner and corrupts the session state (same as
-        # CancelledError).  By continuing, we let the runner finish its
-        # current turn naturally, preserving session integrity.
+        # ── hard stop: break immediately to free resources ──
         if stop_event and stop_event.is_set():
-            continue
+            _logger.info("  [stream] stop_event set — breaking out of runner loop")
+            break
         agent_name = getattr(event, "author", "") or ""
 
         # --- tool function calls (agent → tool) ---
@@ -294,12 +299,35 @@ async def _stream_agent(
                     data = json.dumps({"type": "text", "chunk": part.text, "done": False})
                     yield f"data: {data}\n\n"
                     await asyncio.sleep(0)  # flush immediately
-    # Log the full assistant turn
-    if assistant_text_parts:
-        _log_entry(session_id, "assistant", "".join(assistant_text_parts))
+    except asyncio.CancelledError:
+        _logger.info("[DEBUG][stream] <<< CancelledError in run_async loop after %d events", _event_count)
+    except GeneratorExit:
+        _logger.info("[DEBUG][stream] <<< GeneratorExit in run_async loop after %d events", _event_count)
+        return  # Cannot yield after GeneratorExit
+    except Exception as exc:
+        _logger.warning("[DEBUG][stream] <<< Exception in run_async loop: %s", exc, exc_info=True)
+    finally:
+        _elapsed = _time.monotonic() - _t0
+        _logger.info("[DEBUG][stream] <<< END run_async loop: %d events in %.1fs, stopped=%s",
+                     _event_count, _elapsed, bool(stop_event and stop_event.is_set()))
+    # ── Save partial text on interruption ──────────────────────────────────
+    was_stopped = stop_event and stop_event.is_set()
+    full_text = "".join(assistant_text_parts)
 
-    done_data = json.dumps({"type": "text", "chunk": "", "done": True})
-    yield f"data: {done_data}\n\n"
+    if was_stopped and full_text:
+        partial = full_text + "\n... [输出已被用户中断]"
+        _partial_texts[session_id] = partial
+        _log_entry(session_id, "assistant", partial)
+        _logger.info("[DEBUG][stream] partial text saved (%d chars) for session=%s", len(partial), session_id)
+    elif was_stopped:
+        _logger.info("[DEBUG][stream] stopped but no text to save for session=%s", session_id)
+    elif full_text:
+        _log_entry(session_id, "assistant", full_text)
+        _logger.info("[DEBUG][stream] full text logged (%d chars) for session=%s", len(full_text), session_id)
+
+    if not was_stopped:
+        done_data = json.dumps({"type": "text", "chunk": "", "done": True})
+        yield f"data: {done_data}\n\n"
 
 
 # ---------------------------------------------------------------------------
@@ -401,10 +429,12 @@ async def chat_stream(
     global _active_stream_tasks
 
     sid = session_id or str(uuid.uuid4())
+    _logger.info("[DEBUG][chat_stream] >>> New stream request sid=%s msg=%r", sid, message[:80])
 
     # ── Stop any previous stream task before starting a new one ────────────
     # Signal the old stream to stop cooperatively, then wait briefly.
     if sid in _stop_events:
+        _logger.info("[DEBUG][chat_stream] Stopping previous stream for sid=%s", sid)
         _stop_events[sid].set()
     if sid in _active_stream_tasks:
         old_task = _active_stream_tasks[sid]
@@ -451,18 +481,19 @@ async def chat_stream(
         queue: asyncio.Queue[str | None] = asyncio.Queue()
 
         async def _producer() -> None:
+            _logger.info("[DEBUG][producer] >>> START for sid=%s", sid)
             try:
                 async for chunk in _stream_agent(message, sid, stop_ev):
-                    if stop_ev.is_set():
-                        continue  # drain generator naturally, don't break!
                     await queue.put(chunk)
             except asyncio.CancelledError:
-                pass
+                _logger.info("[DEBUG][producer] CancelledError for sid=%s", sid)
             except Exception as exc:
+                _logger.warning("[DEBUG][producer] Exception for sid=%s: %s", sid, exc)
                 # Surface errors as an SSE error event
                 err = json.dumps({"type": "error", "text": str(exc)})
                 await queue.put(f"data: {err}\n\n")
             finally:
+                _logger.info("[DEBUG][producer] <<< END for sid=%s (putting sentinel)", sid)
                 await queue.put(None)  # sentinel
 
         task = asyncio.create_task(_producer())
@@ -471,11 +502,12 @@ async def chat_stream(
             while True:
                 # Poll for client disconnect while waiting for the next chunk
                 if request is not None and await request.is_disconnected():
-                    # Just signal the stop — do NOT cancel or wait here!
-                    # The /seal endpoint will handle graceful shutdown and
-                    # cleanup.  Hard-cancelling here corrupts ADK session state
-                    # because CancelledError interrupts _runner.run_async().
+                    # Signal stop AND cancel the producer so the runner
+                    # breaks out immediately and resources are freed.
+                    _logger.info("[DEBUG][monitor] Client disconnected for sid=%s, cancelling", sid)
                     stop_ev.set()
+                    if not task.done():
+                        task.cancel()
                     return
 
                 try:
@@ -487,17 +519,17 @@ async def chat_stream(
                     return  # producer finished normally
                 yield chunk
         finally:
-            if stop_ev.is_set():
-                # Cooperative stop in progress — leave the task and state
-                # for /seal to handle.  Do NOT cancel the task here!
-                pass
-            else:
-                # Normal completion — clean up
-                if not task.done():
-                    task.cancel()
-                if _active_stream_tasks.get(sid) is task:
-                    _active_stream_tasks.pop(sid, None)
+            # Always clean up — whether stopped or completed normally
+            _logger.info("[DEBUG][monitor] finally block: task.done=%s stop=%s sid=%s",
+                         task.done(), stop_ev.is_set(), sid)
+            if not task.done():
+                task.cancel()
+            if _active_stream_tasks.get(sid) is task:
+                _active_stream_tasks.pop(sid, None)
+            if not stop_ev.is_set():
+                # Normal completion — remove the stop event
                 _stop_events.pop(sid, None)
+            _logger.info("[DEBUG][monitor] <<< END monitored_stream sid=%s", sid)
 
     return StreamingResponse(
         _monitored_stream(),
@@ -528,7 +560,7 @@ async def seal_session(session_id: str) -> dict:
     or ``{"preserved": false}`` when it was deleted.
     """
     global _active_stream_tasks
-    _logger.info("[seal] Sealing session %s", session_id)
+    _logger.info("[DEBUG][seal] >>> Sealing session %s", session_id)
 
     # ── STEP 1: Append the turn_complete event FIRST ──────────────────────
     # We do this BEFORE stopping the task because stopping (cancel/break)
@@ -540,8 +572,39 @@ async def seal_session(session_id: str) -> dict:
         session_id=session_id,
     )
     if session is None:
-        _logger.warning("[seal] Session %s not found", session_id)
+        _logger.warning("[DEBUG][seal] Session %s not found", session_id)
         return {"preserved": False, "reason": "session_not_found"}
+
+    _logger.info("[DEBUG][seal] Session found. active_tasks=%s stop_events=%s partial_texts=%s",
+                 list(_active_stream_tasks.keys()),
+                 list(_stop_events.keys()),
+                 list(_partial_texts.keys()))
+
+    # ── STEP 1: Signal stop and hard-cancel the running stream ─────────────
+    if session_id in _stop_events:
+        _logger.info("[DEBUG][seal] Setting stop_event for sid=%s", session_id)
+        _stop_events[session_id].set()
+
+    if session_id in _active_stream_tasks:
+        task = _active_stream_tasks[session_id]
+        _logger.info("[DEBUG][seal] Found active task done=%s for sid=%s", task.done(), session_id)
+        if not task.done():
+            task.cancel()
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
+                _logger.info("[DEBUG][seal] Producer task finished after cancel")
+            except (asyncio.CancelledError, asyncio.TimeoutError) as e:
+                _logger.info("[DEBUG][seal] Producer cancel wait ended: %s", type(e).__name__)
+        _active_stream_tasks.pop(session_id, None)
+    else:
+        _logger.info("[DEBUG][seal] No active task found for sid=%s", session_id)
+    _stop_events.pop(session_id, None)
+
+    # ── STEP 2: Append turn_complete with partial text ────────────────────
+    partial = _partial_texts.pop(session_id, None)
+    seal_text = partial if partial else "（用户叫停了当前任务）"
+    _logger.info("[DEBUG][seal] partial_text=%s chars, seal_text preview=%r",
+                 len(partial) if partial else 0, seal_text[:100])
 
     sealed = False
     try:
@@ -550,39 +613,18 @@ async def seal_session(session_id: str) -> dict:
             invocation_id=str(uuid.uuid4()),
             content=genai_types.Content(
                 role="model",
-                parts=[genai_types.Part(text="（用户叫停了当前任务）")],
+                parts=[genai_types.Part(text=seal_text)],
             ),
             turn_complete=True,
         )
         await _session_service.append_event(session=session, event=stop_event)
         sealed = True
-        _logger.info("[seal] Successfully appended turn_complete event")
+        _logger.info("[DEBUG][seal] ✓ Appended turn_complete event (partial=%s)",
+                     bool(partial))
     except Exception as exc:
-        # Don't delete the session!  The frontend keeps the session_id,
-        # so deleting would create a fresh empty session on the next
-        # message — silently losing all context.
-        _logger.warning("[seal] append_event failed: %s (session kept)", exc)
+        _logger.warning("[DEBUG][seal] ✗ append_event FAILED: %s", exc, exc_info=True)
 
-    # ── STEP 2: Now signal the running stream to stop ─────────────────────
-    if session_id in _stop_events:
-        _stop_events[session_id].set()
-
-    if session_id in _active_stream_tasks:
-        task = _active_stream_tasks[session_id]
-        if not task.done():
-            # Give the cooperative stop 3 seconds to work.
-            # The producer will drain _runner.run_async() naturally.
-            try:
-                await asyncio.wait_for(
-                    asyncio.shield(task), timeout=3.0
-                )
-                _logger.info("[seal] Producer task finished cooperatively")
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                task.cancel()  # last resort — session already sealed above
-                _logger.info("[seal] Producer task hard-cancelled (session already sealed)")
-        _active_stream_tasks.pop(session_id, None)
-    _stop_events.pop(session_id, None)
-
+    _logger.info("[DEBUG][seal] <<< DONE sealed=%s sid=%s", sealed, session_id)
     return {"preserved": sealed}
 
 

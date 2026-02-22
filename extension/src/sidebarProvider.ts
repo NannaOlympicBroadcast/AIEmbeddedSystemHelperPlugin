@@ -49,26 +49,44 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     this._sessionId = undefined;
                     break;
                 case "stopStream": {
+                    console.log("[DEBUG][sidebar] stopStream received, sid=", this._sessionId);
                     // Cancel the live SSE connection immediately
                     this._currentAbort?.();
+                    console.log("[DEBUG][sidebar] HTTP stream aborted");
                     const sidToSeal = this._sessionId;
                     if (sidToSeal) {
-                        // Seal the broken ADK turn so the session remains usable
-                        // (context is preserved for the next message)
-                        fetch(`${getBackendUrl()}/session/${sidToSeal}/seal`, {
-                            method: "POST",
-                        })
-                            .then(r => r.json())
-                            .then((_data: unknown) => {
-                                // Always keep the session — don't reset context by default.
-                                // The user can explicitly "Clear History" if they want a fresh start.
-                                this.post({ type: "streamStopped", preserved: true });
-                            })
-                            .catch(() => {
-                                // Network error — keep session_id (optimistic)
-                                this.post({ type: "streamStopped", preserved: true });
+                        // Await the seal so the backend has fully cancelled
+                        // before we tell the user it's ready for a new message.
+                        console.log("[DEBUG][sidebar] calling POST /seal for sid=", sidToSeal);
+                        const t0 = Date.now();
+                        const sealUrl = new URL(`/session/${sidToSeal}/seal`, getBackendUrl());
+                        const sealMod = sealUrl.protocol === "https:" ? https : http;
+                        await new Promise<void>((resolve) => {
+                            const req = sealMod.request(sealUrl, { method: "POST" }, (res) => {
+                                let body = "";
+                                res.on("data", (chunk: Buffer) => (body += chunk.toString()));
+                                res.on("end", () => {
+                                    const elapsed = Date.now() - t0;
+                                    console.log(`[DEBUG][sidebar] /seal responded in ${elapsed}ms: ${body}`);
+                                    try {
+                                        const data = JSON.parse(body);
+                                        this.post({ type: "streamStopped", preserved: data.preserved ?? true });
+                                    } catch {
+                                        this.post({ type: "streamStopped", preserved: true });
+                                    }
+                                    resolve();
+                                });
                             });
+                            req.on("error", (err) => {
+                                console.error("[DEBUG][sidebar] /seal request error:", err);
+                                this.post({ type: "streamStopped", preserved: true });
+                                resolve();
+                            });
+                            req.end();
+                        });
+                        console.log("[DEBUG][sidebar] seal handler complete");
                     } else {
+                        console.log("[DEBUG][sidebar] no sessionId, posting streamStopped directly");
                         this.post({ type: "streamStopped", preserved: true });
                     }
                     break;
@@ -123,6 +141,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     } else if (toolEvent.type === "form") {
                         this.post({ ...toolEvent });
                     }
+                },
+                // Capture session ID immediately from response header —
+                // critical so Stop can call /seal before stream promise resolves
+                (sid) => {
+                    console.log("[DEBUG][sidebar] onSessionId fired:", sid);
+                    this._sessionId = sid;
                 }
             );
             this._currentAbort = abort;
