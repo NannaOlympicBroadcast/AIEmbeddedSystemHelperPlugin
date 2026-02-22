@@ -1,0 +1,113 @@
+:root {
+  --bg: var(--vscode-editor-background, #1e1e1e);
+  --fg: var(--vscode-editor-foreground, #d4d4d4);
+  --input-bg: var(--vscode-input-background, #3c3c3c);
+  --input-border: var(--vscode-input-border, #555);
+  --button-bg: var(--vscode-button-background, #0e639c);
+  --button-fg: var(--vscode-button-foreground, #fff);
+  --user-bubble: var(--vscode-badge-background, #4d4d4d);
+  --assistant-bubble: var(--vscode-editor-inactiveSelectionBackground, #2a2d2e);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+#chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 8px;
+  gap: 8px;
+}
+
+#messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 4px;
+}
+
+.msg {
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.msg.user {
+  align-self: flex-end;
+  background: var(--user-bubble);
+}
+
+.msg.assistant {
+  align-self: flex-start;
+  background: var(--assistant-bubble);
+}
+
+.msg.error {
+  align-self: flex-start;
+  background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+  border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+}
+
+#input-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+#input {
+  flex: 1;
+  background: var(--input-bg);
+  color: var(--fg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  resize: none;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+#input:focus {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+}
+
+button {
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: inherit;
+}
+
+button:hover {
+  filter: brightness(1.1);
+}
+
+#clear-btn {
+  align-self: flex-end;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  border: 1px solid var(--input-border);
+  font-size: 11px;
+  padding: 3px 8px;
+}
