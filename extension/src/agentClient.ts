@@ -7,7 +7,7 @@ export interface ChatResponse {
   reply: string;
 }
 
-function getBackendUrl(): string {
+export function getBackendUrl(): string {
   return vscode.workspace
     .getConfiguration("aiEmbeddedHelper")
     .get<string>("backendUrl", "http://127.0.0.1:8000");
@@ -60,11 +60,21 @@ export async function sendChat(
   });
 }
 
-/** GET /chat/stream – calls onChunk for each SSE chunk, resolves with the session ID when done. */
+/** Parsed SSE tool event from the backend. */
+export interface ToolEvent {
+  type: "tool_start" | "tool_result";
+  name: string;
+  agent: string;
+  args?: Record<string, unknown>;
+  result?: string;
+}
+
+/** GET /chat/stream – calls onChunk for text, onTool for tool events. */
 export async function streamChat(
   message: string,
   sessionId: string | undefined,
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: string) => void,
+  onTool?: (event: ToolEvent) => void
 ): Promise<string | undefined> {
   const url = new URL("/chat/stream", getBackendUrl());
   url.searchParams.set("message", message);
@@ -87,16 +97,22 @@ export async function streamChat(
             continue;
           }
           try {
-            const payload = JSON.parse(line.slice(6)) as {
-              chunk: string;
-              done: boolean;
-            };
-            if (payload.done) {
-              resolve(returnedSessionId);
-              return;
-            }
-            if (payload.chunk) {
-              onChunk(payload.chunk);
+            const payload = JSON.parse(line.slice(6));
+            const payloadType = payload.type ?? "text";
+
+            if (payloadType === "text") {
+              if (payload.done) {
+                resolve(returnedSessionId);
+                return;
+              }
+              if (payload.chunk) {
+                onChunk(payload.chunk);
+              }
+            } else if (
+              (payloadType === "tool_start" || payloadType === "tool_result") &&
+              onTool
+            ) {
+              onTool(payload as ToolEvent);
             }
           } catch {
             // ignore malformed SSE lines

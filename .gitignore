@@ -31,3 +31,8 @@ Thumbs.db
 
 # Secrets
 *.secret
+
+#AI related
+references
+backend/data
+data

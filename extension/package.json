@@ -1,9 +1,10 @@
 {
   "name": "ai-embedded-system-helper",
   "displayName": "AI Embedded System Helper",
-  "description": "AI assistant for embedded systems development, powered by Google ADK and LiteLLM.",
-  "version": "0.1.0",
+  "description": "AI assistant for embedded systems development — supports microcontrollers (PlatformIO) and single-board computers (Electerm). Bundled backend, zero-dependency install.",
+  "version": "0.2.0",
   "publisher": "NannaOlympicBroadcast",
+  "icon": "media/icon.png",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
@@ -18,36 +19,89 @@
     "AI",
     "assistant",
     "LLM",
-    "ADK"
+    "ADK",
+    "PlatformIO",
+    "ESP32",
+    "Raspberry Pi",
+    "IoT"
   ],
   "repository": {
     "type": "git",
     "url": "https://github.com/NannaOlympicBroadcast/AIEmbeddedSystemHelperPlugin"
   },
-  "icon": "media/icon.png",
-  "activationEvents": [
-    "onCommand:aiEmbeddedHelper.openChat"
-  ],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aiEmbeddedHelper",
+          "title": "AI Embedded Helper",
+          "icon": "media/sidebar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "aiEmbeddedHelper": [
+        {
+          "type": "webview",
+          "id": "aiEmbeddedHelper.chatView",
+          "name": "Chat",
+          "icon": "media/sidebar-icon.svg",
+          "contextualTitle": "AI Embedded Helper"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "aiEmbeddedHelper.openChat",
-        "title": "AI Embedded Helper: Open Chat"
+        "title": "AI Embedded Helper: Open Chat",
+        "icon": "media/sidebar-icon.svg"
       }
     ],
     "configuration": {
       "title": "AI Embedded System Helper",
       "properties": {
+        "aiEmbeddedHelper.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API Key for the OpenAI-compatible LLM service.",
+          "order": 1
+        },
+        "aiEmbeddedHelper.apiBase": {
+          "type": "string",
+          "default": "https://api.openai.com/v1",
+          "description": "Base URL of the OpenAI-compatible API endpoint.",
+          "order": 2
+        },
+        "aiEmbeddedHelper.model": {
+          "type": "string",
+          "default": "openai/gpt-4o",
+          "description": "Model identifier in LiteLLM format (e.g. openai/gpt-4o, anthropic/claude-3-sonnet).",
+          "order": 3
+        },
+        "aiEmbeddedHelper.tavilyApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Tavily API Key for web search (get one free at tavily.com).",
+          "order": 4
+        },
         "aiEmbeddedHelper.backendUrl": {
           "type": "string",
           "default": "http://127.0.0.1:8000",
-          "description": "Base URL of the Google ADK backend server."
+          "description": "Base URL of the backend server (only used when 'Use External Backend' is enabled).",
+          "order": 10
+        },
+        "aiEmbeddedHelper.useExternalBackend": {
+          "type": "boolean",
+          "default": false,
+          "description": "Skip the bundled backend and connect to an external server instead.",
+          "order": 11
         },
         "aiEmbeddedHelper.streamingEnabled": {
           "type": "boolean",
           "default": true,
-          "description": "Use streaming (SSE) responses when available."
+          "description": "Use streaming (SSE) responses when available.",
+          "order": 12
         }
       }
     }

@@ -1,14 +1,19 @@
+import * as http from "http";
+import * as https from "https";
 import * as path from "path";
 import * as vscode from "vscode";
-import { sendChat, streamChat, isStreamingEnabled } from "./agentClient";
+import { sendChat, streamChat, isStreamingEnabled, getBackendUrl } from "./agentClient";
 
 type WebviewMessage =
   | { type: "userMessage"; text: string }
-  | { type: "clearHistory" };
+  | { type: "clearHistory" }
+  | { type: "reloadAgent" };
 
 type PanelMessage =
   | { type: "assistantChunk"; text: string }
   | { type: "assistantDone" }
+  | { type: "toolStart"; name: string; agent: string; args: Record<string, unknown> }
+  | { type: "toolResult"; name: string; agent: string; result: string }
   | { type: "error"; text: string };
 
 export class ChatPanel {
@@ -32,6 +37,10 @@ export class ChatPanel {
       async (msg: WebviewMessage) => {
         if (msg.type === "clearHistory") {
           this._sessionId = undefined;
+          return;
+        }
+        if (msg.type === "reloadAgent") {
+          await this._reloadAgent();
           return;
         }
         if (msg.type === "userMessage") {
@@ -68,15 +77,50 @@ export class ChatPanel {
     ChatPanel.current = new ChatPanel(panel, context);
   }
 
+  private async _reloadAgent(): Promise<void> {
+    const url = new URL("/reload", getBackendUrl());
+    await new Promise<void>((resolve) => {
+      const mod = url.protocol === "https:" ? https : http;
+      const req = mod.request(url, { method: "POST" }, (res) => {
+        res.resume();
+        res.on("end", resolve);
+      });
+      req.on("error", resolve); // don't block on failure
+      req.end();
+    });
+    this._panel.webview.postMessage({ type: "agentReloaded" });
+  }
+
   private async _handleUserMessage(text: string): Promise<void> {
     const post = (msg: PanelMessage) =>
       this._panel.webview.postMessage(msg);
 
     if (isStreamingEnabled()) {
       try {
-        const sid = await streamChat(text, this._sessionId, (chunk) => {
-          post({ type: "assistantChunk", text: chunk });
-        });
+        const sid = await streamChat(
+          text,
+          this._sessionId,
+          (chunk) => {
+            post({ type: "assistantChunk", text: chunk });
+          },
+          (toolEvent) => {
+            if (toolEvent.type === "tool_start") {
+              post({
+                type: "toolStart",
+                name: toolEvent.name,
+                agent: toolEvent.agent,
+                args: toolEvent.args ?? {},
+              });
+            } else if (toolEvent.type === "tool_result") {
+              post({
+                type: "toolResult",
+                name: toolEvent.name,
+                agent: toolEvent.agent,
+                result: toolEvent.result ?? "",
+              });
+            }
+          }
+        );
         if (sid) {
           this._sessionId = sid;
         }
@@ -118,12 +162,15 @@ export class ChatPanel {
 </head>
 <body>
   <div id="chat-container">
+    <div id="toolbar">
+      <button id="clear-btn">🗑 Clear</button>
+      <button id="reload-btn">🔄 Reload Agent</button>
+    </div>
     <div id="messages"></div>
     <div id="input-row">
       <textarea id="input" rows="3" placeholder="Ask about embedded systems…"></textarea>
       <button id="send-btn">Send</button>
     </div>
-    <button id="clear-btn">Clear history</button>
   </div>
   <script nonce="${nonce}" src="${mediaUri("chat.js")}"></script>
 </body>
