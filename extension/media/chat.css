@@ -214,7 +214,7 @@ button:hover {
 }
 
 #clear-btn,
-#reload-btn {
+#stop-btn {
   background: transparent;
   color: var(--vscode-descriptionForeground, #888);
   border: 1px solid var(--input-border);
@@ -222,9 +222,14 @@ button:hover {
   padding: 3px 8px;
 }
 
-#reload-btn {
-  border-color: var(--vscode-focusBorder, #007fd4);
-  color: var(--vscode-focusBorder, #007fd4);
+#stop-btn:not(:disabled) {
+  border-color: var(--vscode-inputValidation-errorBorder, #be1100);
+  color: var(--vscode-inputValidation-errorBorder, #be1100);
+}
+
+#stop-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* ── Chat Bubbles (markdown-aware) ─────────────────────────── */
@@ -313,4 +318,111 @@ button:hover {
 
 .arg-key {
   color: var(--vscode-symbolIcon-fieldForeground, #9cdcfe);
+}
+
+/* ── User Form Cards ────────────────────────────────────────── */
+
+.form-card {
+  align-self: flex-start;
+  max-width: 92%;
+  background: var(--vscode-editor-inactiveSelectionBackground, #2a2d2e);
+  border: 1px solid var(--vscode-focusBorder, #007fd4);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.form-desc {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #999);
+  line-height: 1.4;
+}
+
+.form-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.form-label {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #999);
+}
+
+.form-input {
+  background: var(--input-bg);
+  color: var(--fg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.form-input:focus {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+}
+
+.form-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.form-btn {
+  padding: 5px 14px;
+  font-size: 12px;
+  border-radius: 4px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  cursor: pointer;
+  border: none;
+  transition: filter 0.15s;
+}
+
+.form-btn:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.form-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.form-card.form-submitted {
+  border-color: var(--tool-done);
+  opacity: 0.85;
+}
+
+.form-done {
+  font-size: 11px;
+  color: var(--tool-done);
+  margin-top: 2px;
+}
+
+/* ── System notes (stop / context-preserved) ─────────────────── */
+.msg.system-note {
+  align-self: center;
+  background: transparent;
+  border-left: 2px solid var(--vscode-descriptionForeground, #888);
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 11px;
+  font-style: italic;
+  max-width: 90%;
+  padding: 3px 8px;
+  margin: 4px 0;
 }

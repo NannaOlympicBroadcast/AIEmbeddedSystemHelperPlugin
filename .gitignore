@@ -36,3 +36,6 @@ Thumbs.db
 references
 backend/data
 data
+
+# Dream River per-project data
+.dream-river/

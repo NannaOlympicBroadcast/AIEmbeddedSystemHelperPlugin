@@ -97,7 +97,7 @@ export class ChatPanel {
 
     if (isStreamingEnabled()) {
       try {
-        const sid = await streamChat(
+        const { promise } = streamChat(
           text,
           this._sessionId,
           (chunk) => {
@@ -121,6 +121,7 @@ export class ChatPanel {
             }
           }
         );
+        const sid = await promise;
         if (sid) {
           this._sessionId = sid;
         }

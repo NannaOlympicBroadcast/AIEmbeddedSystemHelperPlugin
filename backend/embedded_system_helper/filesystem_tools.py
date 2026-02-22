@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 MAX_FILE_SIZE = 256 * 1024  # 256 KB safety limit
@@ -17,24 +17,25 @@ MAX_FILE_SIZE = 256 * 1024  # 256 KB safety limit
 
 def list_project_files(
     directory: str,
-    max_depth: int = 3,
+    max_depth: Optional[int],
 ) -> dict[str, Any]:
     """List files and subdirectories under *directory* up to *max_depth* levels.
 
     Args:
         directory: Absolute or relative path to the directory to scan.
-        max_depth: Maximum recursion depth (default 3).
+        max_depth: Maximum recursion depth (default 3 when omitted).
 
     Returns:
         A nested dict representing the directory tree, or an error message.
     """
+    depth = max_depth if max_depth is not None else 3
     target = Path(directory).resolve()
     if not target.exists():
         return {"error": f"Directory does not exist: {target}"}
     if not target.is_dir():
         return {"error": f"Path is not a directory: {target}"}
 
-    def _walk(p: Path, depth: int) -> list[dict[str, Any]]:
+    def _walk(p: Path, current: int) -> list[dict[str, Any]]:
         entries: list[dict[str, Any]] = []
         try:
             for child in sorted(p.iterdir()):
@@ -46,8 +47,8 @@ def list_project_files(
                     continue
                 if child.is_dir():
                     entry: dict[str, Any] = {"name": child.name, "type": "dir"}
-                    if depth < max_depth:
-                        entry["children"] = _walk(child, depth + 1)
+                    if current < depth:
+                        entry["children"] = _walk(child, current + 1)
                     entries.append(entry)
                 else:
                     entries.append({

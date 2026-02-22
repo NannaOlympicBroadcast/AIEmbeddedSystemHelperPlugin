@@ -69,22 +69,39 @@ export interface ToolEvent {
   result?: string;
 }
 
-/** GET /chat/stream – calls onChunk for text, onTool for tool events. */
-export async function streamChat(
+/** Parsed SSE form event from the backend. */
+export interface FormEvent {
+  type: "form";
+  form_id: string;
+  title: string;
+  description: string;
+  buttons: Array<{ label: string; value: string }>;
+  fields: Array<{ name: string; label: string; placeholder?: string }>;
+}
+
+export type AgentEvent = ToolEvent | FormEvent;
+
+/** GET /chat/stream – calls onChunk for text, onTool for tool/form events.
+ *  Returns both the promise and an abort() function that terminates the stream
+ *  immediately without triggering an error in the UI. */
+export function streamChat(
   message: string,
   sessionId: string | undefined,
   onChunk: (chunk: string) => void,
-  onTool?: (event: ToolEvent) => void
-): Promise<string | undefined> {
+  onTool?: (event: AgentEvent) => void
+): { promise: Promise<string | undefined>; abort: () => void } {
   const url = new URL("/chat/stream", getBackendUrl());
   url.searchParams.set("message", message);
   if (sessionId) {
     url.searchParams.set("session_id", sessionId);
   }
 
-  return new Promise((resolve, reject) => {
+  let aborted = false;
+  let req: ReturnType<typeof http.request> | undefined;
+
+  const promise = new Promise<string | undefined>((resolve, reject) => {
     const mod = url.protocol === "https:" ? https : http;
-    const req = mod.request(url, { method: "GET" }, (res) => {
+    req = mod.request(url, { method: "GET" }, (res) => {
       const returnedSessionId =
         (res.headers["x-session-id"] as string | undefined) ?? sessionId;
       let buffer = "";
@@ -99,7 +116,6 @@ export async function streamChat(
           try {
             const payload = JSON.parse(line.slice(6));
             const payloadType = payload.type ?? "text";
-
             if (payloadType === "text") {
               if (payload.done) {
                 resolve(returnedSessionId);
@@ -109,10 +125,12 @@ export async function streamChat(
                 onChunk(payload.chunk);
               }
             } else if (
-              (payloadType === "tool_start" || payloadType === "tool_result") &&
+              (payloadType === "tool_start" ||
+                payloadType === "tool_result" ||
+                payloadType === "form") &&
               onTool
             ) {
-              onTool(payload as ToolEvent);
+              onTool(payload as AgentEvent);
             }
           } catch {
             // ignore malformed SSE lines
@@ -120,11 +138,25 @@ export async function streamChat(
         }
       });
       res.on("end", () => resolve(returnedSessionId));
-      res.on("error", reject);
+      res.on("error", (err) => {
+        if (aborted) { resolve(undefined); } else { reject(err); }
+      });
     });
-    req.on("error", reject);
+    req.on("error", (err) => {
+      const code = (err as NodeJS.ErrnoException).code ?? "";
+      if (aborted || code === "ECONNRESET" || code === "ECONNABORTED") {
+        resolve(undefined);
+      } else {
+        reject(err);
+      }
+    });
     req.end();
   });
+
+  return {
+    promise,
+    abort: () => { aborted = true; req?.destroy(); },
+  };
 }
 
 export { isStreamingEnabled };

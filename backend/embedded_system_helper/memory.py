@@ -83,9 +83,9 @@ def save_project_memory(
     project_name: str,
     project_type: str,
     board_model: str,
-    os_info: Optional[str] = None,
-    user_level: Optional[str] = None,
-    official_docs_urls: Optional[List[str]] = None,
+    os_info: Optional[str],
+    user_level: Optional[str],
+    official_docs_urls: Optional[List[str]],
 ) -> dict[str, Any]:
     """Create or fully update a project record.
 

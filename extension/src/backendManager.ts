@@ -26,7 +26,7 @@ export class BackendManager {
 
     constructor(private readonly context: vscode.ExtensionContext) {
         this.outputChannel = vscode.window.createOutputChannel(
-            "AI Embedded Helper Backend"
+            "Dream River Backend"
         );
     }
 
@@ -200,14 +200,31 @@ export class BackendManager {
         const apiBase = cfg.get<string>("apiBase", "https://api.openai.com/v1");
         const model = cfg.get<string>("model", "openai/gpt-4o");
         const tavilyKey = cfg.get<string>("tavilyApiKey", "");
+        const electermMcpUrl = cfg.get<string>("electermMcpUrl", "");
 
         if (apiKey) { env.LITELLM_API_KEY = apiKey; }
         if (apiBase) { env.LITELLM_API_BASE = apiBase; }
         if (model) { env.LITELLM_MODEL = model; }
         if (tavilyKey) { env.TAVILY_API_KEY = tavilyKey; }
+        if (electermMcpUrl) { env.ELECTERM_MCP_URL = electermMcpUrl; }
 
         env.SERVER_HOST = "127.0.0.1";
         env.SERVER_PORT = String(this.port);
+
+        // ── Project-specific data directory ──────────────────────────────────
+        // Prefer: <workspace_root>/.dream-river/data  (each project has its own data)
+        // Fallback: VS Code global storage (cross-project, always writable)
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (workspaceFolder) {
+            env.PROJECT_MEMORY_DIR = path.join(workspaceFolder, ".dream-river", "data");
+        } else {
+            env.PROJECT_MEMORY_DIR = path.join(
+                this.context.globalStorageUri.fsPath, "data"
+            );
+        }
+        this.outputChannel.appendLine(
+            `[BackendManager] Data dir: ${env.PROJECT_MEMORY_DIR}`
+        );
 
         return env;
     }

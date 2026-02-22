@@ -12,6 +12,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     private _view?: vscode.WebviewView;
     private _sessionId?: string;
+    private _currentAbort?: () => void;  // aborts the active SSE stream
+    private _streamGeneration = 0;       // incremented on every new stream; stale handlers check this
 
     constructor(private readonly _extensionUri: vscode.Uri) { }
 
@@ -38,11 +40,39 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         webviewView.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.type) {
                 case "clearHistory":
+                    // Delete the session on the backend before resetting the ID
+                    if (this._sessionId) {
+                        fetch(`${getBackendUrl()}/session/${this._sessionId}`, {
+                            method: "DELETE",
+                        }).catch(() => { /* best-effort */ });
+                    }
                     this._sessionId = undefined;
                     break;
-                case "reloadAgent":
-                    await this._reloadAgent();
+                case "stopStream": {
+                    // Cancel the live SSE connection immediately
+                    this._currentAbort?.();
+                    const sidToSeal = this._sessionId;
+                    if (sidToSeal) {
+                        // Seal the broken ADK turn so the session remains usable
+                        // (context is preserved for the next message)
+                        fetch(`${getBackendUrl()}/session/${sidToSeal}/seal`, {
+                            method: "POST",
+                        })
+                            .then(r => r.json())
+                            .then((_data: unknown) => {
+                                // Always keep the session — don't reset context by default.
+                                // The user can explicitly "Clear History" if they want a fresh start.
+                                this.post({ type: "streamStopped", preserved: true });
+                            })
+                            .catch(() => {
+                                // Network error — keep session_id (optimistic)
+                                this.post({ type: "streamStopped", preserved: true });
+                            });
+                    } else {
+                        this.post({ type: "streamStopped", preserved: true });
+                    }
                     break;
+                }
                 case "userMessage":
                     await this._handleUserMessage(msg.text);
                     break;
@@ -65,33 +95,50 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     private async _handleUserMessage(text: string): Promise<void> {
         if (isStreamingEnabled()) {
-            try {
-                const sid = await streamChat(
-                    text,
-                    this._sessionId,
-                    (chunk) => this.post({ type: "assistantChunk", text: chunk }),
-                    (toolEvent) => {
-                        if (toolEvent.type === "tool_start") {
-                            this.post({
-                                type: "toolStart",
-                                name: toolEvent.name,
-                                agent: toolEvent.agent,
-                                args: toolEvent.args ?? {},
-                            });
-                        } else if (toolEvent.type === "tool_result") {
-                            this.post({
-                                type: "toolResult",
-                                name: toolEvent.name,
-                                agent: toolEvent.agent,
-                                result: toolEvent.result ?? "",
-                            });
-                        }
+            // Each invocation gets a unique generation token.  If a newer call
+            // starts before this one finishes (e.g. user sends while previous
+            // stream is still cleaning up after abort), the older call detects it
+            // and exits without touching _currentAbort or posting assistantDone.
+            const gen = ++this._streamGeneration;
+
+            const { promise, abort } = streamChat(
+                text,
+                this._sessionId,
+                (chunk) => this.post({ type: "assistantChunk", text: chunk }),
+                (toolEvent) => {
+                    if (toolEvent.type === "tool_start") {
+                        this.post({
+                            type: "toolStart",
+                            name: toolEvent.name,
+                            agent: toolEvent.agent,
+                            args: toolEvent.args ?? {},
+                        });
+                    } else if (toolEvent.type === "tool_result") {
+                        this.post({
+                            type: "toolResult",
+                            name: toolEvent.name,
+                            agent: toolEvent.agent,
+                            result: toolEvent.result ?? "",
+                        });
+                    } else if (toolEvent.type === "form") {
+                        this.post({ ...toolEvent });
                     }
-                );
-                if (sid) this._sessionId = sid;
+                }
+            );
+            this._currentAbort = abort;
+            this.post({ type: "streamStarted" });
+            try {
+                const sid = await promise;
+                if (gen !== this._streamGeneration) { return; } // superseded by newer stream
+                if (sid) { this._sessionId = sid; }
                 this.post({ type: "assistantDone" });
             } catch (err) {
+                if (gen !== this._streamGeneration) { return; } // superseded
                 this.post({ type: "error", text: String(err) });
+            } finally {
+                if (gen === this._streamGeneration) {
+                    this._currentAbort = undefined;
+                }
             }
         } else {
             try {
@@ -141,13 +188,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
              script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${mediaUri("chat.css")}">
-  <title>AI Embedded Helper</title>
+  <title>Dream River</title>
 </head>
 <body>
   <div id="chat-container">
     <div id="toolbar">
       <button id="clear-btn">🗑 Clear</button>
-      <button id="reload-btn">🔄 Reload Agent</button>
+      <button id="stop-btn" disabled>⏹ Stop</button>
     </div>
     <div id="messages"></div>
     <div id="input-row">

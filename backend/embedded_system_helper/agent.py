@@ -29,7 +29,9 @@ from embedded_system_helper.filesystem_tools import (
     list_project_files,
     read_project_file,
 )
-from embedded_system_helper.search_agent import search_agent
+from embedded_system_helper.interaction_tools import sleep_tool, request_user_form
+from embedded_system_helper.best_practices_tool import read_best_practices
+from embedded_system_helper.search_agent import build_search_agent
 
 # ---------------------------------------------------------------------------
 # System instruction
@@ -40,6 +42,7 @@ You are **Embedded System Helper**, an expert AI assistant for embedded systems 
 
 ## Your Capabilities
 - **Project Memory**: You remember project details (board model, OS, skill level, official doc URLs, status notes). Use the memory tools to persist and recall this information.
+- **Best Practices Guide**: Call `read_best_practices(topic=...)` before performing tasks like file transfer, WiFi configuration, package installation, SSH setup, Docker, or serial communication. The guide contains community-written, field-tested recipes.
 - **Web Search**: Delegate to the `search_agent` when you need documentation, datasheets, tutorials, or troubleshooting info.
 - **File Inspection**: Use `list_project_files` and `read_project_file` to examine the user's project structure and source code.
 - **PlatformIO** (microcontroller mode): Board discovery, project init, build, upload, library management — available when PlatformIO MCP is connected.
@@ -81,6 +84,24 @@ When the project type is "sbc" and Electerm tools are available:
   2. Launch it, then enable the MCP widget in Electerm settings
   3. Click the **Reload Agent** button in the chat panel to reconnect
 
+### Long-Running Tasks (apt, docker, pip, make…)
+- After starting a long command in the terminal, call `sleep_tool(seconds)` to wait
+  instead of polling repeatedly.  Estimate the expected duration:
+  - `apt install` small packages: 30–60 s
+  - `apt install` large packages / docker build: 60–180 s
+  - Adjust based on context.
+- After sleeping, call `get_electerm_terminal_output` once to check the result.
+- If more time is needed (e.g. output still shows progress), sleep again.
+
+### User Forms
+- Call `request_user_form(...)` when:
+  1. **Pause / resume**: A task is running that the user should watch; show buttons
+     (e.g. "✓ 完成", "⚠ 出现错误") so they can wake the agent when done.
+  2. **Collect info**: You need structured data better gathered via a form than
+     free-text (e.g. network credentials, file paths, multi-choice options).
+- After calling `request_user_form`, your turn ends; the form is shown to the user.
+  When they click/submit, a new message arrives with their response — continue from there.
+
 ## Communication Style
 - Match the user's language (Chinese or English).
 - For beginners: explain concepts, provide step-by-step guidance, warn about common pitfalls.
@@ -102,6 +123,11 @@ _BASE_TOOLS = [
     # Filesystem
     list_project_files,
     read_project_file,
+    # Interaction
+    sleep_tool,
+    request_user_form,
+    # Knowledge
+    read_best_practices,
 ]
 
 
@@ -120,18 +146,50 @@ def build_agent() -> Agent:
     # ── Electerm MCP (SBC terminal) ──────────────────────────────────────────
     electerm_url = getattr(config, "ELECTERM_MCP_URL", "") or ""
     if electerm_url:
+        # TCP socket probe — works for SSE endpoints that stream indefinitely
+        # (httpx.get() would hang waiting for the response body)
+        import socket
+        from urllib.parse import urlparse as _up
+        _parsed = _up(electerm_url)
+        _host = _parsed.hostname or "127.0.0.1"
+        _port = _parsed.port or 80
         try:
-            import httpx  # lightweight; falls back gracefully if missing
-            resp = httpx.get(f"{electerm_url.rstrip('/')}", timeout=1.0)
-            if resp.status_code < 500:
-                from google.adk.tools.mcp_tool.mcp_toolset import McpToolset, SseServerParams  # noqa: PLC0415
-                mcp_toolset = McpToolset(
-                    connection_params=SseServerParams(url=electerm_url)
+            _sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            _sock.settimeout(0.5)
+            _conn = _sock.connect_ex((_host, _port))
+            _sock.close()
+        except Exception as _e:
+            _conn = -1
+            _log.debug("Electerm TCP probe error: %s", _e)
+
+        if _conn == 0:
+            _log.info("Electerm MCP reachable at %s — attaching McpToolset", electerm_url)
+            try:
+                from google.adk.tools.mcp_tool.mcp_toolset import (  # noqa: PLC0415
+                    McpToolset,
+                    StreamableHTTPConnectionParams,
+                    SseConnectionParams,
                 )
+                # Try modern Streamable HTTP transport first (Electerm ≥ 1.37)
+                # Fall back to legacy SSE transport if it fails
+                try:
+                    mcp_toolset = McpToolset(
+                        connection_params=StreamableHTTPConnectionParams(url=electerm_url)
+                    )
+                    _log.info("Electerm MCP toolset attached (StreamableHTTP) successfully")
+                except Exception as _http_exc:
+                    _log.debug("StreamableHTTP failed (%s), retrying with SSE", _http_exc)
+                    mcp_toolset = McpToolset(
+                        connection_params=SseConnectionParams(url=electerm_url)
+                    )
+                    _log.info("Electerm MCP toolset attached (SSE) successfully")
                 tools.append(mcp_toolset)
-                _log.info("Electerm MCP connected at %s", electerm_url)
-        except Exception as exc:
-            _log.debug("Electerm MCP not reachable (%s) — skipping", exc)
+            except Exception as exc:
+                _log.warning("McpToolset init failed: %s", exc)
+        else:
+            _log.debug("Electerm MCP not reachable on %s:%s (connect_ex=%s) — skipping",
+                       _host, _port, _conn)
+
 
     return Agent(
         name="embedded_system_helper",
@@ -143,7 +201,7 @@ def build_agent() -> Agent:
         description="AI assistant for embedded systems development with project memory, web search, and tool integrations.",
         instruction=SYSTEM_INSTRUCTION,
         tools=tools,
-        sub_agents=[search_agent],
+        sub_agents=[build_search_agent()],  # fresh instance — avoids ADK single-parent constraint
     )
 
 

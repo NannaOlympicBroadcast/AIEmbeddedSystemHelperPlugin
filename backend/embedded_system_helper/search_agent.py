@@ -22,8 +22,8 @@ import config
 
 def tavily_search(
     query: str,
-    domains: Optional[List[str]] = None,
-    max_results: Optional[int] = None,
+    domains: Optional[List[str]],
+    max_results: Optional[int],
 ) -> dict[str, Any]:
     """Search the web using Tavily API.
 
@@ -85,22 +85,10 @@ def tavily_search(
 
 
 # ---------------------------------------------------------------------------
-# Search sub-agent definition
+# Search sub-agent factory
 # ---------------------------------------------------------------------------
 
-search_agent = Agent(
-    name="search_agent",
-    model=LiteLlm(
-        model=config.LITELLM_MODEL,
-        api_key=config.LITELLM_API_KEY or None,
-        api_base=config.LITELLM_API_BASE or None,
-    ),
-    description=(
-        "A web search specialist agent. Delegates here when you need to look up "
-        "documentation, datasheets, tutorials, or any online information about "
-        "embedded development boards, operating systems, or tools."
-    ),
-    instruction="""\
+_SEARCH_AGENT_INSTRUCTION = """\
 You are a web search assistant for embedded systems development.
 
 **Search strategy (follow this order):**
@@ -116,6 +104,35 @@ You are a web search assistant for embedded systems development.
 - Summarise the relevant parts; do not dump raw search results.
 - If multiple sources agree, mention that for credibility.
 - If results are contradictory, present both sides.
-""",
-    tools=[tavily_search],
+"""
+
+_SEARCH_AGENT_DESCRIPTION = (
+    "A web search specialist agent. Delegates here when you need to look up "
+    "documentation, datasheets, tutorials, or any online information about "
+    "embedded development boards, operating systems, or tools."
 )
+
+
+def build_search_agent() -> Agent:
+    """Build and return a fresh search sub-agent with no parent.
+
+    Must be called each time a new root agent is constructed; ADK forbids
+    reusing the same sub-agent instance across multiple parent agents.
+    """
+    return Agent(
+        name="search_agent",
+        model=LiteLlm(
+            model=config.LITELLM_MODEL,
+            api_key=config.LITELLM_API_KEY or None,
+            api_base=config.LITELLM_API_BASE or None,
+        ),
+        description=_SEARCH_AGENT_DESCRIPTION,
+        instruction=_SEARCH_AGENT_INSTRUCTION,
+        tools=[tavily_search],
+    )
+
+
+# Module-level singleton for backward compatibility (used at first import).
+# For reloads, call build_search_agent() directly.
+search_agent = build_search_agent()
+

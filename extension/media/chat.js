@@ -1,12 +1,13 @@
 // @ts-check
 (function () {
+  // @ts-ignore: Injected by VS Code Webview
   const vscode = acquireVsCodeApi();
 
   const messagesEl = /** @type {HTMLElement} */ (document.getElementById("messages"));
   const inputEl = /** @type {HTMLTextAreaElement} */ (document.getElementById("input"));
   const sendBtn = /** @type {HTMLButtonElement} */ (document.getElementById("send-btn"));
   const clearBtn = /** @type {HTMLButtonElement} */ (document.getElementById("clear-btn"));
-  const reloadBtn = /** @type {HTMLButtonElement} */ (document.getElementById("reload-btn"));
+  const stopBtn = /** @type {HTMLButtonElement} */ (document.getElementById("stop-btn"));
 
   /** @type {HTMLElement|null} - created lazily on first text chunk */
   let currentAssistantBubble = null;
@@ -79,7 +80,10 @@
     return out.join("");
   }
 
-  /** Apply inline markdown spans (bold, italic, code, links). */
+  /**
+   * Apply inline markdown spans (bold, italic, code, links).
+   * @param {string} text
+   */
   function applyInline(text) {
     return text
       // Inline code `...`
@@ -98,6 +102,7 @@
   }
 
   // ─── Tool Icons ──────────────────────────────────────────────────────────
+  /** @type {Record<string, string>} */
   const TOOL_ICONS = {
     tavily_search: "🔍",
     get_project_memory: "🧠",
@@ -175,7 +180,7 @@
    * Create a running tool card and append it to the message flow.
    * @param {string} name
    * @param {string} agent
-   * @param {object} args
+   * @param {Record<string, any>} args
    * @returns {HTMLElement}
    */
   function appendToolCard(name, agent, args) {
@@ -240,6 +245,107 @@
     }
   }
 
+  // ─── User Form Cards ─────────────────────────────────────────────────────
+
+  /**
+   * Render an interactive form card in the chat flow.
+   * When the user submits (button click or field submit), send a chat message
+   * back through the normal userMessage channel so the agent continues.
+   * @param {{ form_id: string, title?: string, description?: string, buttons?: any[], fields?: any[] }} formDef
+   */
+  function appendFormCard(formDef) {
+    const { form_id, title, description, buttons = [], fields = [] } = formDef;
+
+    const card = document.createElement("div");
+    card.className = "form-card";
+    card.dataset.formId = form_id;
+
+    // ── Build inner HTML ──────────────────────────────────────────────────
+    let fieldsHtml = "";
+    for (const f of fields) {
+      fieldsHtml += `
+        <div class="form-field">
+          <label class="form-label">${f.label || f.name}</label>
+          <input class="form-input" type="text" name="${f.name}"
+                 placeholder="${f.placeholder || ""}" />
+        </div>`;
+    }
+
+    let buttonsHtml = "";
+    for (const b of buttons) {
+      buttonsHtml += `
+        <button class="form-btn" data-value="${b.value}">${b.label}</button>`;
+    }
+
+    card.innerHTML = `
+      <div class="form-header">📋 <strong>${title}</strong></div>
+      ${description ? `<div class="form-desc">${description}</div>` : ""}
+      ${fieldsHtml ? `<div class="form-fields">${fieldsHtml}</div>` : ""}
+      <div class="form-buttons">${buttonsHtml}</div>
+    `;
+
+    // ── Wire up submission ────────────────────────────────────────────────
+    /**
+     * @param {string} buttonLabel
+     * @param {string} buttonValue
+     */
+    function submitForm(buttonLabel, buttonValue) {
+      // Collect field values
+      const inputs = /** @type {NodeListOf<HTMLInputElement>} */ (card.querySelectorAll(".form-input"));
+      /** @type {string[]} */
+      const fieldLines = [];
+      inputs.forEach((inp) => {
+        if (inp.value.trim()) {
+          fieldLines.push(`${inp.name}: ${inp.value.trim()}`);
+        }
+      });
+
+      // Build the message the agent will receive
+      const lines = [
+        `[用户表单响应 form_id=${form_id}]`,
+        `按钮: ${buttonLabel}`,
+        `值: ${buttonValue}`,
+      ];
+      if (fieldLines.length) {
+        lines.push("字段:");
+        lines.push(...fieldLines.map((l) => "  " + l));
+      }
+      const msg = lines.join("\n");
+
+      // Disable the form and show a done state
+      card.querySelectorAll("button").forEach((b) => (b.disabled = true));
+      card.querySelectorAll("input").forEach((i) => (i.disabled = true));
+      card.classList.add("form-submitted");
+      const doneEl = document.createElement("div");
+      doneEl.className = "form-done";
+      doneEl.textContent = `✓ 已提交：${buttonLabel}`;
+      card.appendChild(doneEl);
+
+      // Send as a new chat message
+      vscode.postMessage({ type: "userMessage", text: msg });
+    }
+
+    /** @type {NodeListOf<HTMLButtonElement>} */ (card.querySelectorAll(".form-btn")).forEach((btn) => {
+      btn.addEventListener("click", () => {
+        submitForm(btn.textContent || "", btn.dataset.value || "");
+      });
+    });
+
+    // Allow pressing Enter in text fields to trigger first button
+    /** @type {NodeListOf<HTMLInputElement>} */ (card.querySelectorAll(".form-input")).forEach((inp) => {
+      inp.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const firstBtn = /** @type {HTMLButtonElement|null} */ (card.querySelector(".form-btn"));
+          if (firstBtn) firstBtn.click();
+        }
+      });
+    });
+
+    messagesEl.appendChild(card);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
   // ─── Send / receive ──────────────────────────────────────────────────────
 
   function sendMessage() {
@@ -272,10 +378,9 @@
     vscode.postMessage({ type: "clearHistory" });
   });
 
-  reloadBtn.addEventListener("click", () => {
-    reloadBtn.disabled = true;
-    reloadBtn.textContent = "🔄 Reloading…";
-    vscode.postMessage({ type: "reloadAgent" });
+  stopBtn.addEventListener("click", () => {
+    stopBtn.disabled = true;
+    vscode.postMessage({ type: "stopStream" });
   });
 
   // ─── Message handler ─────────────────────────────────────────────────────
@@ -293,10 +398,19 @@
         _assistantRawText = "";
         sendBtn.disabled = false;
         inputEl.disabled = false;
+        stopBtn.disabled = true;
         inputEl.focus();
         break;
 
+      case "streamStarted":
+        stopBtn.disabled = false;
+        break;
+
       case "toolStart":
+        // Seal current text bubble so post-tool text goes into a NEW bubble
+        // placed AFTER the tool card, not prepended to the bubble above it.
+        currentAssistantBubble = null;
+        _assistantRawText = "";
         appendToolCard(msg.name, msg.agent, msg.args);
         break;
 
@@ -304,10 +418,11 @@
         completeToolCard(msg.name, msg.result);
         break;
 
-      case "agentReloaded":
-        reloadBtn.disabled = false;
-        reloadBtn.textContent = "🔄 Reload Agent";
-        appendUserBubble("error", "✅ Agent reloaded — Electerm MCP tools now active if Electerm is running.");
+      case "form":
+        // Seal current text bubble so the form appears inline after agent text.
+        currentAssistantBubble = null;
+        _assistantRawText = "";
+        appendFormCard(msg);
         break;
 
       case "error":
@@ -320,8 +435,27 @@
         }
         sendBtn.disabled = false;
         inputEl.disabled = false;
+        stopBtn.disabled = true;
         inputEl.focus();
         break;
+
+      case "streamStopped": {
+        // Shown after seal endpoint responds — context preserved or reset
+        currentAssistantBubble = null;
+        _assistantRawText = "";
+        const noteEl = document.createElement("div");
+        noteEl.className = "msg system-note";
+        noteEl.textContent = msg.preserved
+          ? "⏹ 任务已停止 · 上下文已保留，可继续对话"
+          : "⏹ 任务已停止 · 上下文已重置（新对话将从头开始）";
+        messagesEl.appendChild(noteEl);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        sendBtn.disabled = false;
+        inputEl.disabled = false;
+        stopBtn.disabled = true;
+        inputEl.focus();
+        break;
+      }
     }
   });
 })();

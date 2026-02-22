@@ -1,9 +1,9 @@
 {
   "name": "ai-embedded-system-helper",
-  "displayName": "AI Embedded System Helper",
-  "description": "AI assistant for embedded systems development — supports microcontrollers (PlatformIO) and single-board computers (Electerm). Bundled backend, zero-dependency install.",
+  "displayName": "Dream River",
+  "description": "Dream River — AI assistant for embedded systems development. Supports microcontrollers (PlatformIO) and single-board computers (Electerm). Bundled backend, zero-dependency install.",
   "version": "0.2.0",
-  "publisher": "NannaOlympicBroadcast",
+  "publisher": "OpenOtter",
   "icon": "media/icon.png",
   "license": "MIT",
   "engines": {
@@ -35,7 +35,7 @@
       "activitybar": [
         {
           "id": "aiEmbeddedHelper",
-          "title": "AI Embedded Helper",
+          "title": "Dream River",
           "icon": "media/sidebar-icon.svg"
         }
       ]
@@ -47,19 +47,19 @@
           "id": "aiEmbeddedHelper.chatView",
           "name": "Chat",
           "icon": "media/sidebar-icon.svg",
-          "contextualTitle": "AI Embedded Helper"
+          "contextualTitle": "Dream River"
         }
       ]
     },
     "commands": [
       {
         "command": "aiEmbeddedHelper.openChat",
-        "title": "AI Embedded Helper: Open Chat",
+        "title": "Dream River: Open Chat",
         "icon": "media/sidebar-icon.svg"
       }
     ],
     "configuration": {
-      "title": "AI Embedded System Helper",
+      "title": "Dream River",
       "properties": {
         "aiEmbeddedHelper.apiKey": {
           "type": "string",
@@ -102,6 +102,12 @@
           "default": true,
           "description": "Use streaming (SSE) responses when available.",
           "order": 12
+        },
+        "aiEmbeddedHelper.electermMcpUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:30837/mcp",
+          "description": "URL of the Electerm MCP server (SSE endpoint). Enable the MCP widget in Electerm settings first. Check the URL shown there and paste it here.",
+          "order": 20
         }
       }
     }
