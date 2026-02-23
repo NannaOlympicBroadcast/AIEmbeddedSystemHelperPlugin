@@ -18,9 +18,9 @@ load_dotenv()
 
 
 # -- LLM / API settings ---------------------------------------------------
-LITELLM_API_BASE: str = os.getenv("LITELLM_API_BASE", "https://api.openai.com/v1")
-LITELLM_API_KEY: str = os.getenv("LITELLM_API_KEY", "")
-LITELLM_MODEL: str = os.getenv("LITELLM_MODEL", "openai/gpt-4o")
+LITELLM_API_BASE: str = os.getenv("LITELLM_API_BASE", "https://api.openai.com/v1").strip()
+LITELLM_API_KEY: str = os.getenv("LITELLM_API_KEY", "").strip()
+LITELLM_MODEL: str = os.getenv("LITELLM_MODEL", "openai/gpt-4o").strip()
 
 # -- Server settings -------------------------------------------------------
 SERVER_HOST: str = os.getenv("SERVER_HOST", "127.0.0.1")

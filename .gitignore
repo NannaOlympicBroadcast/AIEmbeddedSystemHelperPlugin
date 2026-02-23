@@ -39,3 +39,5 @@ data
 
 # Dream River per-project data
 .dream-river/
+extension/resources/bin
+backend/*.spec

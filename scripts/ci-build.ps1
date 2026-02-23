@@ -31,7 +31,9 @@ function Test-ExitCode {
     }
     Write-Host "[OK] $StepName" -ForegroundColor Green
 }
-
+conda activate fastmcp
+# 帮我打印出对应python可执行文件的地址
+Write-Step -Text "python path: $(which python)"
 # 1. Python deps
 Write-Step -Text "1/5  Installing Python dependencies"
 $ErrorActionPreference = "Continue"

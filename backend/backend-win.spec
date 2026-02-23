@@ -1,11 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_data_files
+
+datas = [('E:\\AIEmbeddedSystemHelperPlugin\\backend\\embedded_system_helper', 'embedded_system_helper')]
+datas += collect_data_files('litellm')
 
 
 a = Analysis(
     ['E:\\AIEmbeddedSystemHelperPlugin\\backend\\main.py'],
     pathex=[],
     binaries=[],
-    datas=[('E:\\AIEmbeddedSystemHelperPlugin\\backend\\embedded_system_helper', 'embedded_system_helper')],
+    datas=datas,
     hiddenimports=['uvicorn.logging', 'uvicorn.protocols.http', 'uvicorn.protocols.http.auto', 'uvicorn.protocols.websockets', 'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan', 'uvicorn.lifespan.on', 'google.adk', 'litellm', 'embedded_system_helper', 'embedded_system_helper.agent', 'embedded_system_helper.memory', 'embedded_system_helper.search_agent', 'embedded_system_helper.filesystem_tools'],
     hookspath=[],
     hooksconfig={},

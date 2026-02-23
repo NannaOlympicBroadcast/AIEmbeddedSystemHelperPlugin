@@ -11,6 +11,7 @@ GET  /health      – liveness probe
 import asyncio
 import json
 import logging
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -392,6 +393,58 @@ async def reload_agent() -> dict:
     except Exception as exc:
         _tb.print_exc()  # print full traceback to server console for debugging
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/reload-config")
+async def reload_config(request: Request) -> dict:
+    """Re-read config from .env and/or request body, then rebuild the runner.
+
+    Called by the VSCode extension when the user changes settings so that
+    the external backend picks up the new values without a full restart.
+
+    Accepts an optional JSON body with env overrides, e.g.::
+
+        {"LITELLM_MODEL": "openai/gpt-4o", "LITELLM_API_KEY": "sk-..."}
+
+    Any keys provided in the body are applied to ``os.environ`` before
+    ``config`` is refreshed.
+    """
+    import importlib
+
+    # Apply optional overrides from request body
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    if isinstance(body, dict):
+        for key, value in body.items():
+            if isinstance(value, str) and value.strip():
+                os.environ[key] = value.strip()
+
+    # Re-read .env (values already in os.environ take precedence by default,
+    # so we use override=True to let the .env file win for keys NOT passed
+    # in the body).
+    from dotenv import load_dotenv as _reload_dotenv
+    _reload_dotenv(override=True)
+
+    # Re-apply any body overrides AFTER .env reload so they always win
+    if isinstance(body, dict):
+        for key, value in body.items():
+            if isinstance(value, str) and value.strip():
+                os.environ[key] = value.strip()
+
+    # Refresh the config module
+    importlib.reload(config)
+
+    # Rebuild runner with new config
+    _rebuild_runner()
+
+    return {
+        "status": "reloaded",
+        "model": config.LITELLM_MODEL,
+        "api_base": config.LITELLM_API_BASE,
+    }
 
 
 

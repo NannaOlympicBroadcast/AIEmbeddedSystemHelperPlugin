@@ -61,6 +61,8 @@ def main() -> None:
         "--hidden-import", "uvicorn.lifespan.on",
         "--hidden-import", "google.adk",
         "--hidden-import", "litellm",
+        # Collect litellm data files (model_prices JSON, etc.)
+        "--collect-data", "litellm",
         "--hidden-import", "embedded_system_helper",
         "--hidden-import", "embedded_system_helper.agent",
         "--hidden-import", "embedded_system_helper.memory",

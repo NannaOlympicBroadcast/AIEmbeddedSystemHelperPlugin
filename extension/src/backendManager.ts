@@ -86,11 +86,16 @@ export class BackendManager {
         await this.waitForHealth();
     }
 
-    /** Gracefully stop the backend process. */
-    async stop(): Promise<void> {
-        this.configWatcher?.dispose();
-        this.configWatcher = undefined;
+    /** Gracefully stop the backend process.
+     * @param keepWatcher If true, do NOT dispose the config watcher (used during restart).
+     */
+    async stop(keepWatcher = false): Promise<void> {
+        if (!keepWatcher) {
+            this.configWatcher?.dispose();
+            this.configWatcher = undefined;
+        }
         if (!this.process) {
+            this.outputChannel.appendLine("[BackendManager] No process to stop.");
             return;
         }
         this.outputChannel.appendLine("[BackendManager] Stopping backend...");
@@ -108,6 +113,7 @@ export class BackendManager {
 
             this.process.on("exit", () => {
                 clearTimeout(timeout);
+                this.outputChannel.appendLine("[BackendManager] Backend process exited.");
                 resolve();
             });
 
@@ -132,16 +138,101 @@ export class BackendManager {
                 return;
             }
             this.outputChannel.appendLine(
-                "[BackendManager] Settings changed — restarting backend to apply new config..."
+                "[BackendManager] Settings changed — applying new config..."
             );
-            vscode.window.showInformationMessage(
-                "AI Embedded Helper: Settings changed, restarting backend..."
-            );
-            await this.stop();
-            await this.start();
-            this.outputChannel.appendLine(
-                "[BackendManager] Backend restarted with new settings."
-            );
+
+            const cfg = vscode.workspace.getConfiguration("aiEmbeddedHelper");
+            const useExternal = cfg.get<boolean>("useExternalBackend", false);
+
+            if (useExternal) {
+                // For external backends, call the /reload-config endpoint
+                // to hot-reload settings without restarting the process.
+                const backendUrl = this.getBackendUrl();
+                const env = this.buildEnv(cfg);
+                try {
+                    const http = require("http");
+                    const url = new URL(`${backendUrl}/reload-config`);
+                    const body = JSON.stringify({
+                        LITELLM_API_KEY: env.LITELLM_API_KEY || "",
+                        LITELLM_API_BASE: env.LITELLM_API_BASE || "",
+                        LITELLM_MODEL: env.LITELLM_MODEL || "",
+                        TAVILY_API_KEY: env.TAVILY_API_KEY || "",
+                        ELECTERM_MCP_URL: env.ELECTERM_MCP_URL || "",
+                    });
+                    const req = http.request(
+                        {
+                            hostname: url.hostname,
+                            port: url.port,
+                            path: url.pathname,
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json",
+                                "Content-Length": Buffer.byteLength(body),
+                            },
+                        },
+                        (res: any) => {
+                            if (res.statusCode === 200) {
+                                vscode.window.showInformationMessage(
+                                    "AI Embedded Helper: Config reloaded successfully."
+                                );
+                                this.outputChannel.appendLine(
+                                    "[BackendManager] External backend config reloaded ✓"
+                                );
+                            } else {
+                                vscode.window.showWarningMessage(
+                                    `AI Embedded Helper: Config reload failed (HTTP ${res.statusCode}). Please restart the backend manually.`
+                                );
+                            }
+                        }
+                    );
+                    req.on("error", () => {
+                        vscode.window.showWarningMessage(
+                            "AI Embedded Helper: Could not reach backend for config reload. Please restart it manually."
+                        );
+                    });
+                    req.write(body);
+                    req.end();
+                } catch {
+                    vscode.window.showWarningMessage(
+                        "AI Embedded Helper: Config reload request failed. Please restart the backend manually."
+                    );
+                }
+            } else {
+                // For bundled backends, do a full restart to pick up new env vars
+                vscode.window.showInformationMessage(
+                    "AI Embedded Helper: Settings changed, restarting backend..."
+                );
+                this.outputChannel.appendLine(
+                    "[BackendManager] Config change detected — stopping current backend..."
+                );
+                await this.stop(/* keepWatcher */ true);
+                // On Windows, the OS may not release the port immediately after
+                // taskkill.  Wait a short time before starting the new process.
+                this.outputChannel.appendLine(
+                    "[BackendManager] Waiting for port release..."
+                );
+                await new Promise((r) => setTimeout(r, 1500));
+                this.outputChannel.appendLine(
+                    "[BackendManager] Starting backend with new settings..."
+                );
+                try {
+                    await this.start();
+                    this.outputChannel.appendLine(
+                        "[BackendManager] Backend restarted with new settings ✓"
+                    );
+                    vscode.window.showInformationMessage(
+                        "AI Embedded Helper: Backend restarted successfully."
+                    );
+                } catch (err) {
+                    this.outputChannel.appendLine(
+                        `[BackendManager] Backend restart FAILED: ${err}`
+                    );
+                    vscode.window.showErrorMessage(
+                        `AI Embedded Helper: Backend restart failed — ${err}. ` +
+                        "Try reloading the window (Ctrl+Shift+P → Reload Window)."
+                    );
+                }
+            }
         });
         return this.configWatcher;
     }
