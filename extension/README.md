@@ -1,191 +1,145 @@
 # Dream River
 
-**AI assistant for embedded systems development** — chat with an LLM that understands your board, can operate your terminal, and knows community-written best practices.
+**嵌入式系统开发 AI 助手** — 与了解你开发板的大语言模型对话，可操作终端，并熟知社区编写的最佳实践。
 
-> Built with Google ADK · Works with any OpenAI-compatible API · Zero-dependency install (bundled backend)
+> 基于 Google ADK 构建 · 兼容任何 OpenAI 格式 API · 零依赖安装（内置后端）
 
 ---
 
-## Features
+## 功能特性
 
 | | |
 |---|---|
-| 💬 **Streaming Chat** | SSE-based real-time responses with inline tool-call cards |
-| 🧠 **Project Memory** | Board model, OS, skill level, and doc links remembered across sessions |
-| 📚 **Best Practices Guide** | Community-editable `best_practices.md` — agent consults it before file transfer, WiFi setup, apt installs, and more |
-| 🖥️ **Electerm Integration** | Agent operates SSH/serial terminals on remote boards via Electerm MCP |
-| 🔧 **PlatformIO Integration** | Board discovery, project init, build, upload, and library management |
-| 🔍 **Web Search** | Tavily-powered search with priority on official datasheets and tutorials |
-| ⏹ **Force Stop** | Interrupt generation mid-stream without corrupting the session |
-| 😴 **Sleep Tool** | Agent can wait during long `apt install` / `docker build` without polling |
-| 📋 **User Forms** | Agent can present inline forms for structured input or pause/resume flows |
+| 💬 **流式对话** | 基于 SSE 的实时响应，内联工具调用卡片 |
+| 🧠 **项目记忆** | 自动记住开发板型号、操作系统、技能水平和文档链接 |
+| 📚 **最佳实践指南** | 社区可编辑的 `best_practices.md` — Agent 在执行文件传输、WiFi 配置、apt 安装等操作前会参考 |
+| 🖥️ **Electerm 集成** | Agent 通过 Electerm MCP 操作远程开发板的 SSH/串口终端 |
+| 🔧 **PlatformIO 集成** | 开发板发现、项目初始化、编译、上传和库管理 |
+| 🔍 **网络搜索** | 基于 Tavily 的搜索，优先匹配官方数据手册和教程 |
+| ⏹ **强制停止** | 中途打断生成，不会损坏会话状态 |
+| 😴 **休眠工具** | Agent 可在长时间 `apt install` / `docker build` 期间等待，无需轮询 |
+| 📋 **用户表单** | Agent 可展示内联表单用于结构化输入或暂停/恢复流程 |
 
 ---
 
-## Prerequisites
+## 前置要求
 
-Dream River requires at least one of the following MCP backends depending on your hardware:
+Dream River 根据你的硬件类型，至少需要以下一种 MCP 后端：
 
-### For Single-Board Computers (Raspberry Pi, Radxa, Jetson…)
+### 单板计算机（Raspberry Pi、Radxa、Jetson……）
 
-Install **[Electerm](https://electerm.html5beta.com/)** — a cross-platform SSH/serial terminal with built-in MCP support.
+安装 **[Electerm](https://electerm.html5beta.com/)** — 一款跨平台 SSH/串口终端，内置 MCP 支持。
 
-1. Download and install Electerm from the official site.
-2. Open Electerm → **Settings → MCP** → enable **MCP server** (default port `30837`).
-3. In VS Code Settings, set:
+1. 从官网下载并安装 Electerm。
+2. 打开 Electerm → **设置 → MCP** → 启用 **MCP 服务器**（默认端口 `30837`）。
+3. 在 VS Code 设置中配置：
    ```
    Dream River: Electerm MCP URL = http://127.0.0.1:30837/mcp
    ```
 
-### For Microcontrollers (Arduino, ESP32, STM32…)
+### 微控制器（Arduino、ESP32、STM32……）
 
-Install the **PlatformIO MCP server** (when available) or use PlatformIO CLI directly. The agent can run `pio` commands through Electerm if the CLI is installed.
+安装 **PlatformIO MCP 服务器**（如可用）或直接使用 PlatformIO CLI。如果已安装 CLI，Agent 可通过 Electerm 执行 `pio` 命令。
 
 ### LLM API
 
-You need access to any **OpenAI-compatible** API endpoint, for example:
+你需要一个 **兼容 OpenAI 格式** 的 API 端点，例如：
 
-| Provider | API Base | Example Model |
+| 提供商 | API 地址 | 示例模型 |
 |---|---|---|
 | OpenAI | `https://api.openai.com/v1` | `openai/gpt-4o` |
 | DeepSeek | `https://api.deepseek.com/v1` | `deepseek/deepseek-chat` |
-| Ollama (local) | `http://localhost:11434/v1` | `openai/qwen2.5-coder:7b` |
+| Ollama（本地） | `http://localhost:11434/v1` | `openai/qwen2.5-coder:7b` |
 | Azure OpenAI | `https://<your>.openai.azure.com/` | `azure/<deployment>` |
 
 ---
 
-## Installation
+## 安装
 
-Install from the [Open VSX Marketplace](https://open-vsx.org/extension/OpenOtter/ai-embedded-system-helper) or search **"Dream River"** in the VS Code Extensions panel.
+从 [Open VSX Marketplace](https://open-vsx.org/extension/OpenOtter/ai-embedded-system-helper) 安装，或在 VS Code 扩展面板中搜索 **"Dream River"**。
 
-No Python or pip required — the backend executable is bundled inside the extension.
-
----
-
-## Configuration
-
-Open VS Code Settings (`Ctrl+,`) and search **"Dream River"**:
-
-| Setting | Description | Default |
-|---|---|---|
-| `aiEmbeddedHelper.apiKey` | API key for your LLM provider | *(required)* |
-| `aiEmbeddedHelper.apiBase` | OpenAI-compatible base URL | `https://api.openai.com/v1` |
-| `aiEmbeddedHelper.model` | Model name (LiteLLM format) | `openai/gpt-4o` |
-| `aiEmbeddedHelper.tavilyApiKey` | Tavily API key for web search | *(optional)* |
-| `aiEmbeddedHelper.electermMcpUrl` | Electerm MCP server URL | `http://127.0.0.1:30837/mcp` |
-| `aiEmbeddedHelper.streamingEnabled` | Enable SSE streaming | `true` |
-| `aiEmbeddedHelper.useExternalBackend` | Use your own backend process | `false` |
-| `aiEmbeddedHelper.backendUrl` | URL of external backend | `http://127.0.0.1:8000` |
-
-Settings changes trigger an automatic backend restart — no manual reload needed.
+无需 Python 或 pip — 后端可执行文件已内置于扩展中。
 
 ---
 
-## Data Storage
+## 配置
 
-Dream River stores project memory and conversation logs inside your opened workspace:
+打开 VS Code 设置（`Ctrl+,`）并搜索 **"Dream River"**：
+
+下面以chatglm为例说明应该如何填写
+
+| 设置项 | 说明 | 默认值 | 备注 |
+|---|---|---|---|
+| `aiEmbeddedHelper.apiKey` | LLM 提供商的 API 密钥 | *（必填）* |  |
+| `aiEmbeddedHelper.apiBase` | 兼容 OpenAI 格式的 API 地址 | `https://open.bigmodel.cn/api/paas/v4` | 这是chatglm的open ai compatible地址 |
+| `aiEmbeddedHelper.model` | 模型名称（LiteLLM 格式：provider/model） | `openai/glm-5` | openai compatible就填openai/xxxx，由于chatglm使openai compatible所以就填openai |
+| `aiEmbeddedHelper.tavilyApiKey` | Tavily API 密钥（用于网络搜索） | *（可选）* | 在https://app.tavily.com获取 |
+| `aiEmbeddedHelper.electermMcpUrl` | Electerm MCP 服务器地址 | `http://127.0.0.1:30837/mcp` |  |
+| `aiEmbeddedHelper.streamingEnabled` | 启用 SSE 流式传输 | `true` | 推荐开启 |
+| `aiEmbeddedHelper.useExternalBackend` | 使用外部后端进程 | `false` | 系统自带后端进程，如无需二次开发调试无需勾选 |
+| `aiEmbeddedHelper.backendUrl` | 外部后端地址 | `http://127.0.0.1:8000` | 只有在useExternalBackend为true时勾选 |
+
+修改设置后会自动重启后端 — 无需手动重新加载。
+
+---
+
+## 数据存储
+
+Dream River 在当前打开的工作区中存储项目记忆和对话日志：
 
 ```
 <your_project>/
 └── .dream-river/
     └── data/
-        ├── projects/   ← remembered board configs, doc URLs, notes
-        └── logs/       ← per-session JSONL conversation logs
+        ├── projects/   ← 记住的开发板配置、文档链接、笔记
+        └── logs/       ← 按会话保存的 JSONL 对话日志
 ```
 
-Each VS Code workspace has **its own independent data directory**. If no workspace is open, data is saved to the VS Code global storage location.
+每个 VS Code 工作区拥有**独立的数据目录**。如果没有打开工作区，数据将保存到 VS Code 全局存储位置。
 
-> `.dream-river/` is automatically added to `.gitignore` by the extension.
+> `.dream-river/` 会被扩展自动添加到 `.gitignore`。
 
 ---
 
-## Best Practices Guide
+## 最佳实践指南
 
-The file `backend/best_practices.md` is a **contributor-editable** knowledge base. The agent reads it before performing common tasks. Add your own team's practices:
+`backend/best_practices.md` 是一个**社区可编辑**的知识库，Agent 在执行常见任务前会参考它。你可以添加自己团队的实践：
 
 ```bash
 git clone <repo>
-# Edit backend/best_practices.md
-# Add a new ## Section and send a PR
+# 编辑 backend/best_practices.md
+# 新增一个 ## 章节，然后提交 PR
 ```
 
-You can view and edit it at `<your_extension_dir>/resources/best_practices.md` after installation.
-
----
-
-## Usage
-
-1. Open the **Dream River** panel from the sidebar (river icon).
-2. Type a question or task description in the chat box.
-3. The agent will use tools (terminal, memory, search) as needed and show inline status cards.
-4. Long operations: the agent will wait using `sleep_tool` instead of polling.
-5. To stop mid-generation: click the **⏹ Stop** button in the toolbar.
-
-### Example Prompts
-
-```
-Set up a Raspberry Pi 5 project — board is running Raspberry Pi OS Lite, IP is 192.168.1.42
-```
-```
-Install Docker on the board and verify it runs hello-world
-```
-```
-Transfer build/firmware.bin to the board and flash it
-```
-```
-Connect the board to WiFi "MyNetwork" and verify internet access
-```
-```
-Initialize an ESP32 PlatformIO project with the Arduino framework
-```
+安装后可在 `<扩展目录>/resources/best_practices.md` 查看和编辑。
 
 ---
 
-## Architecture
+## 使用方法
+
+1. 从侧边栏打开 **Dream River** 面板（河流图标）。
+2. 在对话框中输入问题或任务描述。
+3. Agent 会根据需要使用工具（终端、记忆、搜索），并显示内联状态卡片。
+4. 长时间操作：Agent 会使用 `sleep_tool` 等待，而非轮询。
+5. 中途停止生成：点击工具栏中的 **⏹ 停止** 按钮。
+
+### 示例提示
 
 ```
-VS Code Extension (TypeScript)
-  ├── Sidebar WebView (chat.js / chat.css)   ← UI, SSE consumer
-  ├── SidebarProvider (sidebarProvider.ts)   ← bridge: webview ↔ backend
-  ├── BackendManager (backendManager.ts)     ← spawns/kills Python backend
-  └── AgentClient (agentClient.ts)           ← HTTP/SSE requests to backend
-
-Bundled Python Backend (FastAPI + Google ADK)
-  ├── main.py                                ← FastAPI app, SSE endpoint
-  ├── agent.py                               ← ADK agent, tools registry
-  ├── memory.py                              ← project memory persistence
-  ├── interaction_tools.py                   ← sleep_tool, request_user_form
-  └── best_practices_tool.py                 ← read_best_practices()
+搭建一个 Raspberry Pi 5 项目 — 开发板运行 Raspberry Pi OS Lite，IP 是 192.168.1.42
+```
+```
+在开发板上安装 Docker 并验证 hello-world 能否运行
+```
+```
+将 build/firmware.bin 传输到开发板并烧录
+```
+```
+将开发板连接到 WiFi "MyNetwork" 并验证网络连通性
+```
+```
+初始化一个使用 Arduino 框架的 ESP32 PlatformIO 项目
 ```
 
 ---
 
-## Development
-
-```bash
-# Clone
-git clone https://github.com/OpenOtter/dream-river
-cd dream-river
-
-# Backend (Python 3.11+)
-cd backend
-pip install -e ".[dev]"
-cp .env.example .env   # fill in API keys
-python main.py
-
-# Extension (Node 18+)
-cd extension
-npm install
-# Press F5 in VS Code to launch Extension Development Host
-```
-
-Enable hot-reload:
-```
-DEV_RELOAD=1  # in backend/.env
-```
-
----
-
-## License
-
-MIT © [OpenOtter](https://github.com/OpenOtter)
